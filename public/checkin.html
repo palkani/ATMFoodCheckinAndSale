@@ -1,0 +1,67 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lunch Check-in</title><link rel="stylesheet" href="/style.css"><style>td.n,th.n{text-align:right}#counts td,#counts th{padding:6px 8px}</style></head><body>
+<main>
+  <div class="row tabs" style="margin-bottom:12px"><button data-tab="pre">🎟 Preorder check-in</button><button data-tab="walk">🛒 Walk-up lunch sale</button></div>
+  <div id="walkup" hidden></div>
+  <div id="tabPre">
+  <div class="panel row" style="margin-bottom:12px;align-items:center">
+    <span id="status" style="flex:3;min-width:200px"></span>
+    <button id="upload" style="flex:1">⬆ Upload sheet</button>
+    <a href="/sheet.xlsx" id="dl" style="flex:1"><button style="width:100%">⬇ Download updated</button></a>
+    <input type="file" id="file" accept=".xlsx" hidden>
+  </div>
+  <div class="panel" id="counts" style="margin-bottom:12px;padding:6px 14px 10px"></div>
+  <input id="q" placeholder="🔍 Search by phone number or name" autofocus inputmode="search" style="margin-bottom:12px;font-size:20px">
+  <div class="panel" style="padding:0" id="list"></div>
+  </div>
+</main>
+<script type="module">
+import { $, api, esc, toast, nav, mountPOS, me } from '/common.js';
+if ((await me()).role !== 'admin') ['#upload', '#dl'].forEach((s) => document.querySelector(s).remove());
+nav('checkin');
+mountPOS($('#walkup'), { category: 'lunch', title: 'Walk-up lunch' });
+const tabs = (t) => { $('#tabPre').hidden = t !== 'pre'; $('#walkup').hidden = t !== 'walk'; document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('primary', b.dataset.tab === t)); };
+document.querySelectorAll('.tabs button').forEach((b) => (b.onclick = () => tabs(b.dataset.tab)));
+tabs('pre');
+let list = [], st = {};
+async function refresh() {
+  st = await api('GET', '/api/sheet');
+  $('#status').innerHTML = st.loaded ? `<b>${st.checkedIn}</b> of <b>${st.total}</b> checked in${st.hasPhone ? '' : ' · <span style="color:var(--bad)">no phone column found</span>'}` : 'No sheet loaded — upload your preorder Excel file (.xlsx)';
+  if ($('#dl')) $('#dl').style.display = st.loaded ? '' : 'none';
+  counts();
+  search();
+}
+async function counts() {
+  const c = await api('GET', '/api/sheet/counts');
+  const sum = (k) => c.items.reduce((n, i) => n + i[k], 0);
+  const row = (name, o, c2, tone) => `<tr style="${tone ? `font-weight:700;background:color-mix(in srgb, ${tone} 18%, transparent);box-shadow:inset 4px 0 0 ${tone}` : ''}"><td>${name}</td><td class="n">${o}</td><td class="n" style="color:var(--ok)">${c2}</td><td class="n" style="color:${o - c2 ? 'var(--bad)' : 'var(--mute)'}">${o - c2}</td></tr>`;
+  $('#counts').innerHTML = `<table><thead><tr><th>Lunches</th><th class="n">Ordered</th><th class="n">Checked in</th><th class="n">Not checked in</th></tr></thead><tbody>${
+    c.items.map((i) => row(esc(i.label), i.ordered, i.checkedIn)).join('')}${row('Total lunches', sum('ordered'), sum('checkedIn'), '#2563eb')}
+    ${row('People (orders)', c.people.total, c.people.checkedIn, '#a855f7')}</tbody></table>`;
+}
+async function search() {
+  list = st.loaded ? await api('GET', '/api/sheet/search?q=' + encodeURIComponent($('#q').value)) : [];
+  $('#list').innerHTML = !st.loaded ? '' : list.length ? list.map((p) => `<div class="person ${p.checkedIn ? 'done' : ''}"><div class="info"><b>${esc(p.name || '(no name)')}</b> ${p.phone ? '· ' + esc(p.phone) : ''}
+    <div style="margin:6px 0">${p.items.map((i) => `<span class="tag paid" style="font-size:15px;margin-right:4px">${i.qty}× ${esc(i.label)}</span>`).join('')}</div>
+    <small>${[p.slot && '🕒 ' + esc(p.slot), p.total && 'Paid $' + (parseFloat(p.total) || 0).toFixed(2), ...p.fields.map(([k, v]) => `${esc(k)}: ${esc(v)}`)].filter(Boolean).join(' · ')}</small>
+    ${p.checkedIn ? `<small>Checked in ${esc(p.checkedInAt)}</small>` : ''}</div>
+    ${p.checkedIn ? `<button data-undo="${p.row}">Undo</button>` : `<button class="primary" data-ci="${p.row}">Check in</button>`}</div>`).join('')
+    : '<p style="padding:14px;color:var(--mute)">No match</p>';
+}
+document.addEventListener('click', async (e) => {
+  const d = e.target.closest('button')?.dataset; if (!d) return;
+  try {
+    if (d.ci) { await api('POST', '/api/sheet/checkin', { row: +d.ci }); toast('Checked in ✓ (sheet updated)'); await refresh(); }
+    if (d.undo) { await api('POST', '/api/sheet/undo', { row: +d.undo }); await refresh(); }
+  } catch { refresh(); }
+});
+if ($('#upload')) $('#upload').onclick = () => $('#file').click();
+$('#file').onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  if (st.loaded && !confirm('Replace the current sheet? Check-ins recorded in it will be lost unless you downloaded it.')) return (e.target.value = '');
+  const r = await fetch('/api/sheet/upload', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f });
+  const j = await r.json(); if (!r.ok) toast(j.error); else toast('Sheet loaded'); e.target.value = ''; refresh();
+};
+let t; $('#q').oninput = () => { clearTimeout(t); t = setTimeout(search, 150); };
+refresh();
+</script></body></html>

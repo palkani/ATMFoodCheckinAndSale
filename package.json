@@ -1,0 +1,16 @@
+{
+  "name": "atm-food-checkin-and-sale",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Snack POS and preorder lunch check-in, with cash/zelle/card transaction log",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}

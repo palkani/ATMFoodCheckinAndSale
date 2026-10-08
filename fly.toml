@@ -1,0 +1,27 @@
+# Change `app` to a unique name before launching (flyctl launch --no-deploy --copy-config will prompt).
+app = "atm-food-sale"
+primary_region = "iad"
+
+[build]
+
+[env]
+  DATA_DIR = "/data"
+  TRUST_PROXY = "1"
+  PORT = "3000"
+
+# The database and Excel files live here and survive restarts and deploys.
+[mounts]
+  source = "atm_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  [http_service.checks]
+    [http_service.checks.health]
+      interval = "30s"
+      timeout = "5s"
+      path = "/healthz"

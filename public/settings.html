@@ -1,0 +1,22 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings</title><link rel="stylesheet" href="/style.css"></head><body>
+<main style="max-width:520px">
+  <h2>Change a password</h2>
+  <div class="panel" style="display:grid;gap:10px">
+    <select id="u" style="font:inherit;padding:12px;border-radius:10px"><option value="admin">Admin / Treasurer</option><option value="rep">Sales Rep</option></select>
+    <input id="p1" type="password" placeholder="New password (6+ characters)" autocomplete="new-password">
+    <input id="p2" type="password" placeholder="Repeat new password" autocomplete="new-password">
+    <button id="save" class="primary">Save password</button>
+    <p style="color:var(--mute);margin:0">Changing a password logs that account out everywhere. If you change your own, you'll need to log in again.</p>
+  </div>
+</main>
+<script type="module">
+import { $, api, toast, nav } from '/common.js';
+nav('settings');
+$('#save').onclick = async () => {
+  if ($('#p1').value !== $('#p2').value) return toast('Passwords do not match');
+  await api('POST', '/api/users/password', { username: $('#u').value, password: $('#p1').value });
+  toast('Password updated'); $('#p1').value = $('#p2').value = '';
+  if ($('#u').value === 'admin') setTimeout(() => (location.href = '/login'), 1000);
+};
+</script></body></html>

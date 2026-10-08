@@ -1,0 +1,7 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Snack Sale</title><link rel="stylesheet" href="/style.css"></head><body>
+<main id="pos"></main>
+<script type="module">
+import { nav, mountPOS } from '/common.js';
+nav('snack'); mountPOS(document.getElementById('pos'), { category: 'snack' });
+</script></body></html>

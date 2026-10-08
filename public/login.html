@@ -1,0 +1,27 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Log in</title><link rel="stylesheet" href="/style.css"></head><body>
+<main style="max-width:380px;margin-top:8vh">
+  <div class="panel">
+    <h2 style="margin-top:0">🍱 ATM Food Sale</h2>
+    <p style="color:var(--mute);margin-top:-8px">Who is logging in?</p>
+    <form id="f" style="display:grid;gap:10px">
+      <div class="row" id="who">
+        <button type="button" data-u="admin" class="primary">Admin / Treasurer</button>
+        <button type="button" data-u="rep">Sales Rep</button>
+      </div>
+      <input id="pw" type="password" placeholder="Password" autocomplete="current-password" required autofocus>
+      <button class="primary" style="padding:16px">Log in</button>
+      <p id="err" style="color:var(--bad);margin:0;min-height:1.2em"></p>
+    </form>
+  </div>
+</main>
+<script>
+let user = 'admin';
+const pick = (u) => { user = u; document.querySelectorAll('#who button').forEach((b) => b.classList.toggle('primary', b.dataset.u === u)); document.getElementById('pw').focus(); };
+document.querySelectorAll('#who button').forEach((b) => (b.onclick = () => pick(b.dataset.u)));
+document.getElementById('f').onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user, password: document.getElementById('pw').value }) });
+  if (r.ok) location.href = '/snack'; else { document.getElementById('err').textContent = (await r.json()).error; document.getElementById('pw').select(); }
+};
+</script></body></html>
