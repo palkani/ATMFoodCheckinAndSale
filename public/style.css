@@ -38,3 +38,5 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px;text-align:left;bord
 .toast.show{opacity:1}
 .modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;padding:14px;z-index:10}
 .modal.show{display:flex}.modal .panel{width:100%;max-width:380px}
+
+.pay .vol{grid-column:1/-1;background:#d97706;padding:14px 6px}

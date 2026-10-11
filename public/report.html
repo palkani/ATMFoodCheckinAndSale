@@ -31,7 +31,11 @@ async function load() {
   h += sec('Sales by seller', table(['Seller', 'Snacks', 'Walk-up lunch', 'Total', 'Txns'], r.byUser.map((u) => [esc(u.user), money(u.snack), money(u.lunch), '<b>' + money(u.amount) + '</b>', u.count])));
   h += sec('Items sold', table(['Item', 'Qty', 'Cash qty', 'Zelle qty', 'Card qty', 'Revenue'], r.items.map((i) => [(i.kind === 'lunch' ? '🛒 ' : '🍪 ') + esc(i.name), i.qty, i.cash, i.zelle, i.card, money(i.revenue)])));
   h += sec('Sales by hour', table(['Hour', 'Transactions', 'Amount'], r.hourly.map((x) => [new Date(2000, 0, 1, x.hour).toLocaleTimeString([], { hour: 'numeric' }), x.count, money(x.amount)])));
-  h += sec('Lunches served (preorder pickups + walk-ups)', table(['Lunch', 'Preorder picked up', 'Walk-up sold', 'Total'], r.lunches.map((l) => [esc(l.label), l.preorder, l.walkup, '<b>' + l.total + '</b>'])));
+  h += sec('Lunches served (preorder pickups + walk-ups + volunteers)', table(['Lunch', 'Preorder picked up', 'Walk-up sold', 'Volunteers', 'Total'], r.lunches.map((l) => [esc(l.label), l.preorder, l.walkup, l.volunteer, '<b>' + l.total + '</b>'])));
+  const v = r.volunteers;
+  h += sec(`🤝 Given to volunteers — ${v.totalQty} items, worth ${money(v.totalValue)} (not charged)`,
+    (v.people.some((x) => x.name !== '(no name)') ? table(['Volunteer', 'Snacks', 'Meals', 'Total items', 'Value', 'Times'], v.people.map((x) => [esc(x.name), x.snacks, x.meals, '<b>' + x.qty + '</b>', money(x.value), x.visits])) + '<div style="height:10px"></div>' : '') +
+    table(['Item', 'Qty', 'Value'], v.items.map((i) => [(i.kind === 'lunch' ? '🍱 ' : '🍪 ') + esc(i.name), i.qty, money(i.value)])));
   const p = r.preorders;
   if (p.loaded) {
     h += sec(`Preorders — ${p.checkedIn} of ${p.orders} orders checked in (prepaid ${money(p.prepaid * 100)}, picked up ${money(p.prepaidPicked * 100)})`,
@@ -39,7 +43,7 @@ async function load() {
       table(['Serving time', 'Orders', 'Checked in', 'Lunches', 'Lunches picked up'], p.slots.map((s) => [esc(s.slot), s.orders, s.checkedIn, s.lunches, s.lunchesPicked])));
   } else h += sec('Preorders', '<p style="color:var(--mute)">No preorder sheet loaded.</p>');
   h += sec('All transactions', table(['#', 'Time', 'Type', 'Details', 'Payment', 'By', 'Amount'], r.rows.slice().reverse().map((x) => [x.id,
-    new Date(x.created_at.replace(' ', 'T') + 'Z').toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), x.kind === 'lunch' ? 'Walk-up lunch' : 'Snack', esc(x.description), x.method, x.sold_by === 'admin' ? 'Admin' : 'Rep', money(x.total_cents)]), 6));
+    new Date(x.created_at.replace(' ', 'T') + 'Z').toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), x.kind === 'lunch' ? 'Walk-up lunch' : 'Snack', esc(x.description), x.method, ({ admin: 'Admin', snack: 'Snack', checkin: 'Check-in', rep: 'Rep' })[x.sold_by] || esc(x.sold_by), money(x.total_cents)]), 6));
   $('#body').innerHTML = h;
 }
 $('#d').onchange = load; $('#print').onclick = () => print();

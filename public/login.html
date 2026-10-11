@@ -7,7 +7,8 @@
     <form id="f" style="display:grid;gap:10px">
       <div class="row" id="who">
         <button type="button" data-u="admin" class="primary">Admin / Treasurer</button>
-        <button type="button" data-u="rep">Sales Rep</button>
+        <button type="button" data-u="snack">Snack Sales</button>
+        <button type="button" data-u="checkin">Food Check-in</button>
       </div>
       <input id="pw" type="password" placeholder="Password" autocomplete="current-password" required autofocus>
       <button class="primary" style="padding:16px">Log in</button>
@@ -22,6 +23,6 @@ document.querySelectorAll('#who button').forEach((b) => (b.onclick = () => pick(
 document.getElementById('f').onsubmit = async (e) => {
   e.preventDefault();
   const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user, password: document.getElementById('pw').value }) });
-  if (r.ok) location.href = '/snack'; else { document.getElementById('err').textContent = (await r.json()).error; document.getElementById('pw').select(); }
+  if (r.ok) location.href = '/'; else { document.getElementById('err').textContent = (await r.json()).error; document.getElementById('pw').select(); }
 };
 </script></body></html>

@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
-import { appendToSheet, editWorkbook } from './xl.js';
+import { appendToSheet, editWorkbook, VOLUNTEER_HEADERS } from './xl.js';
 import { DATA_DIR } from './config.js';
 
 export const WALKUP = 'Walk-up Sales';
+export const VOLUNTEER_MEALS = 'Volunteer Meals';
+const EXTRA_SHEETS = [WALKUP, VOLUNTEER_MEALS];
 
 export const SHEET_PATH = process.env.SHEET_PATH || path.join(DATA_DIR, 'preorders.xlsx');
 const CHECK_COLS = ['Checked In', 'Checked In At', 'Checked In By'];
@@ -24,7 +26,7 @@ async function open() {
   if (!fs.existsSync(SHEET_PATH)) return null;
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(SHEET_PATH);
-  const ws = wb.worksheets.find((w) => w.name !== WALKUP);
+  const ws = wb.worksheets.find((w) => !EXTRA_SHEETS.includes(w.name));
   if (!ws) return null;
   const headers = [];
   ws.getRow(1).eachCell({ includeEmpty: false }, (c, n) => headers.push({ n, label: text(c.value).trim() }));
@@ -92,17 +94,22 @@ export const save = (buf) => locked(async () => {
   try { await wb.xlsx.load(buf); } catch { throw Object.assign(new Error('Could not read that file. Upload an .xlsx file.'), { code: 400 }); }
   if (!wb.worksheets.length) throw Object.assign(new Error('Workbook has no sheets'), { code: 400 });
   fs.mkdirSync(path.dirname(SHEET_PATH), { recursive: true });
-  // Walk-up sales already recorded must survive replacing the preorder sheet.
+  // Walk-up sales and volunteer meals already recorded must survive replacing the preorder sheet.
   const old = new ExcelJS.Workbook();
   if (fs.existsSync(SHEET_PATH)) await old.xlsx.readFile(SHEET_PATH);
-  const oldWalk = old.getWorksheet(WALKUP);
-  if (oldWalk && oldWalk.rowCount > 1 && !wb.getWorksheet(WALKUP)) {
-    oldWalk.eachRow((r, n) => { if (n > 1) appendToSheet(wb, WALKUP, r.values.slice(1)); });
-    await wb.xlsx.writeFile(SHEET_PATH);
-  } else fs.writeFileSync(SHEET_PATH, buf);
+  let carried = false;
+  for (const name of EXTRA_SHEETS) {
+    const oldWs = old.getWorksheet(name);
+    if (!oldWs || oldWs.rowCount < 2 || wb.getWorksheet(name)) continue;
+    const headers = oldWs.getRow(1).values.slice(1);
+    oldWs.eachRow((r, n) => { if (n > 1) appendToSheet(wb, name, r.values.slice(1), headers); });
+    carried = true;
+  }
+  if (carried) await wb.xlsx.writeFile(SHEET_PATH); else fs.writeFileSync(SHEET_PATH, buf);
 });
 
 // Walk-up lunch sales go on their own tab of the preorder workbook.
+export const appendVolunteerMeal = (values) => locked(() => editWorkbook(SHEET_PATH, (wb) => appendToSheet(wb, VOLUNTEER_MEALS, values, VOLUNTEER_HEADERS)));
 export const appendWalkup = (values) => locked(() => editWorkbook(SHEET_PATH, (wb) => appendToSheet(wb, WALKUP, values)));
 
 // Lunch counts per type, split by checked in / not yet, plus the number of orders (people).

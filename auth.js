@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 
 const SESSION_HOURS = 12;
-export const ROLES = { admin: 'Admin / Treasurer', rep: 'Sales Rep' };
+// 'rep' is the retired single sales login; kept only so old transactions still show a readable name.
+export const ROLES = { admin: 'Admin / Treasurer', snack: 'Snack Sales', checkin: 'Food Check-in', rep: 'Sales Rep (retired)' };
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const hashPw = (pw, salt) => crypto.scryptSync(pw, salt, 32).toString('hex');
 const WORDS = ['mango', 'lotus', 'diya', 'jasmine', 'tamil', 'kolam', 'sweet', 'lamp', 'rangoli', 'banana'];
@@ -18,7 +19,9 @@ export function initAuth(db) {
       .run(username, role, salt, hashPw(pw, salt));
   };
   // First start: create both accounts. Passwords come from the environment or are generated and printed once.
-  for (const [username, env] of [['admin', 'ADMIN_PASSWORD'], ['rep', 'REP_PASSWORD']]) {
+  db.prepare("DELETE FROM sessions WHERE username='rep'").run();
+  db.prepare("DELETE FROM users WHERE username='rep'").run();
+  for (const [username, env] of [['admin', 'ADMIN_PASSWORD'], ['snack', 'SNACK_PASSWORD'], ['checkin', 'CHECKIN_PASSWORD']]) {
     if (db.prepare('SELECT 1 FROM users WHERE username=?').get(username)) continue;
     const pw = process.env[env] || randomPassword();
     setPassword(username, username, pw);

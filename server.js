@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import * as sheet from './sheet.js';
-import { SNACK_PATH, appendSnackSale } from './snacklog.js';
+import { SNACK_PATH, appendSnackSale, appendVolunteerSnack } from './snacklog.js';
 import { localStamp } from './xl.js';
 import { buildReport, reportWorkbook } from './report.js';
 import { initAuth, ROLES } from './auth.js';
@@ -32,6 +32,8 @@ if (!db.prepare('PRAGMA table_info(snack_items)').all().some((c) => c.name === '
 const UPLOADS = path.join(DATA_DIR, 'images');
 fs.mkdirSync(UPLOADS, { recursive: true });
 const auth = initAuth(db);
+if (!db.prepare('PRAGMA table_info(transactions)').all().some((c) => c.name === 'volunteer'))
+  db.exec("ALTER TABLE transactions ADD COLUMN volunteer TEXT NOT NULL DEFAULT ''");
 if (!db.prepare('PRAGMA table_info(sale_lines)').all().some((c) => c.name === 'unit_cents'))
   db.exec('ALTER TABLE sale_lines ADD COLUMN unit_cents INTEGER NOT NULL DEFAULT 0');
 if (!db.prepare('PRAGMA table_info(snack_items)').all().some((c) => c.name === 'category'))
@@ -50,15 +52,20 @@ if (db.prepare("SELECT COUNT(*) c FROM snack_items WHERE category='snack'").get(
 for (const [name, img] of [['Tea', 'tea'], ['Water Bottle', 'water-bottle'], ['Samosa', 'samosa'], ['Pizza', 'pizza'], ['Veg Lunch', 'veg-lunch'], ['Non-Veg Lunch', 'non-veg-lunch']])
   db.prepare('UPDATE snack_items SET image=? WHERE name=? AND image IS NULL').run(`/img/${img}.svg`, name);
 
+const canSell = (role, kind) => role === 'admin' || (role === 'snack' && kind === 'snack') || (role === 'checkin' && kind === 'lunch');
 const cents = (v) => Math.round(Number(v) * 100);
 const fail = (code, msg) => Object.assign(new Error(msg), { code });
-const logTx = (kind, method, total, description, soldBy) =>
-  db.prepare('INSERT INTO transactions (kind, method, total_cents, description, sold_by) VALUES (?,?,?,?,?)')
-    .run(kind, method, total, description, soldBy);
+const logTx = (kind, method, total, description, soldBy, volunteer = '') =>
+  db.prepare('INSERT INTO transactions (kind, method, total_cents, description, sold_by, volunteer) VALUES (?,?,?,?,?,?)')
+    .run(kind, method, total, description, soldBy, volunteer);
 const needMethod = (m) => { if (!METHODS.includes(m)) throw fail(400, 'Payment method must be cash, zelle or card'); };
 
 const routes = {
-  'GET /api/snacks': ({ query }) => db.prepare('SELECT * FROM snack_items WHERE active=1 AND category=? ORDER BY name').all(query.get('category') || 'snack'),
+  'GET /api/snacks': ({ query, user }) => {
+    const category = query.get('category') || 'snack';
+    if (!canSell(user.role, category)) throw fail(403, 'Your login cannot do this');
+    return db.prepare('SELECT * FROM snack_items WHERE active=1 AND category=? ORDER BY name').all(category);
+  },
   'POST /api/snacks/:id/image': ({ params, query, raw }) => {
     const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[query.get('type')];
     if (!ext) throw fail(400, 'Use a PNG, JPEG or WebP picture');
@@ -86,7 +93,9 @@ const routes = {
   'DELETE /api/snacks/:id': ({ params }) => { db.prepare('UPDATE snack_items SET active=0 WHERE id=?').run(params.id); return { ok: true }; },
 
   'POST /api/sales': async ({ body, user }) => {
-    needMethod(body.method);
+    const isVolunteer = body.method === 'volunteer';
+    const volunteer = isVolunteer ? String(body.volunteer || '').trim().slice(0, 60) : '';
+    if (!isVolunteer) needMethod(body.method);
     if (!Array.isArray(body.items) || !body.items.length) throw fail(400, 'Cart is empty');
     let total = 0; const parts = []; const lines = []; const kinds = new Set();
     for (const { id, qty } of body.items) {
@@ -96,14 +105,26 @@ const routes = {
     }
     if (kinds.size !== 1) throw fail(400, 'Cannot mix snacks and lunch in one sale');
     const kind = [...kinds][0];
-    const tx = logTx(kind, body.method, total, (kind === 'lunch' ? 'Walk-up: ' : '') + parts.join(', '), user.username);
+    if (!canSell(user.role, kind)) throw fail(403, 'Your login cannot sell this');
+    // Volunteer items are free: nothing is charged, but the retail value stays on each line for reporting.
+    const charged = isVolunteer ? 0 : total;
+    const label = isVolunteer ? `Volunteer${volunteer ? ' ' + volunteer : ''}: ` : kind === 'lunch' ? 'Walk-up: ' : '';
+    const tx = logTx(kind, body.method, charged, label + parts.join(', '), user.username, volunteer);
     for (const [name, qty, unit] of lines) db.prepare('INSERT INTO sale_lines (tx_id, kind, name, qty, unit_cents) VALUES (?,?,?,?,?)').run(tx.lastInsertRowid, kind, name, qty, unit);
     // The database is the record of truth; a failed Excel write (e.g. file open elsewhere) must not undo the sale.
-    const excelRow = [Number(tx.lastInsertRowid), localStamp(), parts.join(', '), lines.reduce((n, l) => n + l[1], 0), body.method, total / 100, ROLES[user.role]];
+    const qty = lines.reduce((n, l) => n + l[1], 0), id = Number(tx.lastInsertRowid), now = localStamp();
     let excel = true;
-    try { await (kind === 'lunch' ? sheet.appendWalkup(excelRow) : appendSnackSale(excelRow)); }
+    try {
+      if (isVolunteer) {
+        const row = [id, now, volunteer, parts.join(', '), qty, total / 100, ROLES[user.role]];
+        await (kind === 'lunch' ? sheet.appendVolunteerMeal(row) : appendVolunteerSnack(row));
+      } else {
+        const row = [id, now, parts.join(', '), qty, body.method, total / 100, ROLES[user.role]];
+        await (kind === 'lunch' ? sheet.appendWalkup(row) : appendSnackSale(row));
+      }
+    }
     catch (e) { excel = false; console.error('Excel write failed:', e.message); }
-    return { ok: true, total_cents: total, excel };
+    return { ok: true, total_cents: charged, volunteer: isVolunteer, excel };
   },
 
   'GET /api/sheet': async () => sheet.status(),
@@ -129,9 +150,12 @@ const routes = {
   },
 };
 
-// Everything not listed here is open to any logged-in user (Admin/Treasurer or Sales Rep).
+// Who may use what. Anything not listed is open to every logged-in user (menu reads, sales, pictures).
+// Admin may do everything; 'snack' sells snacks only; 'checkin' handles preorder check-in and walk-up lunch only.
+const HOME = { admin: '/snack', snack: '/snack', checkin: '/checkin' };
+const PAGE_ROLES = { 'snack.html': ['admin', 'snack'], 'checkin.html': ['admin', 'checkin'], 'report.html': ['admin'], 'settings.html': ['admin'] };
 const ADMIN_ONLY = new Set(['POST /api/snacks', 'POST /api/snacks/:id/image', 'PUT /api/snacks/:id', 'DELETE /api/snacks/:id', 'POST /api/sheet/upload', 'GET /api/report', 'GET /api/transactions', 'POST /api/users/password']);
-const ADMIN_FILES = new Set(['report.html', 'settings.html']);
+const CHECKIN_API = new Set(['GET /api/sheet', 'GET /api/sheet/counts', 'GET /api/sheet/search', 'POST /api/sheet/checkin', 'POST /api/sheet/undo']);
 const ADMIN_DOWNLOADS = new Set(['/sheet.xlsx', '/snack-sales.xlsx', '/report.xlsx']);
 const PUBLIC_FILES = new Set(['login.html', 'style.css', 'common.js']);
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
@@ -156,7 +180,7 @@ http.createServer(async (req, res) => {
     if (url.pathname === '/healthz') return send(200, 'ok', 'text/plain');
     const token = cookie(req, 'sid');
     const user = auth.session(token);
-    const page = { '/': 'snack.html', '/snack': 'snack.html', '/checkin': 'checkin.html', '/report': 'report.html', '/log': 'report.html', '/settings': 'settings.html', '/login': 'login.html' }[url.pathname];
+    const page = { '/snack': 'snack.html', '/checkin': 'checkin.html', '/report': 'report.html', '/log': 'report.html', '/settings': 'settings.html', '/login': 'login.html' }[url.pathname];
     const file = page || url.pathname.slice(1);
     const redirect = (to) => { res.writeHead(302, { Location: to }); res.end(); };
 
@@ -181,10 +205,12 @@ http.createServer(async (req, res) => {
     const isApi = url.pathname.startsWith('/api/');
     if (!PUBLIC_FILES.has(file) || isApi) {
       if (!user) return isApi ? send(401, { error: 'Please log in' }) : redirect('/login');
-      const adminOnly = ADMIN_FILES.has(file) || ADMIN_DOWNLOADS.has(url.pathname) || (isApi && ADMIN_ONLY.has(matchRoute(req.method, url.pathname)?.key));
-      if (adminOnly && user.role !== 'admin') return isApi || ADMIN_DOWNLOADS.has(url.pathname) ? send(403, { error: 'Admin / Treasurer only' }) : redirect('/snack');
+      const key = isApi ? matchRoute(req.method, url.pathname)?.key : null;
+      const allowed = ADMIN_DOWNLOADS.has(url.pathname) || ADMIN_ONLY.has(key) ? ['admin'] : CHECKIN_API.has(key) ? ['admin', 'checkin'] : PAGE_ROLES[file];
+      if (allowed && !allowed.includes(user.role)) return isApi || ADMIN_DOWNLOADS.has(url.pathname) ? send(403, { error: 'Your login cannot do this' }) : redirect(HOME[user.role]);
     }
-    if (url.pathname === '/login' && user) return redirect('/snack');
+    if (url.pathname === '/' ) return redirect(user ? HOME[user.role] : '/login');
+    if (url.pathname === '/login' && user) return redirect(HOME[user.role]);
     const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     const downloads = { '/sheet.xlsx': [sheet.SHEET_PATH, 'lunch-preorders.xlsx'], '/snack-sales.xlsx': [SNACK_PATH, 'snack-sales.xlsx'] };
     if (downloads[url.pathname]) {

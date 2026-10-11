@@ -16,7 +16,7 @@ export const me = () => (mePromise ||= fetch('/api/me').then((r) => (r.ok ? r.js
 export async function nav(active) {
   document.body.insertAdjacentHTML('afterbegin', '<div class="toast"></div>');
   const u = await me();
-  const links = [['snack', '🍪 Snack Sale'], ['checkin', '🍱 Lunch Check-in'], ...(u.role === 'admin' ? [['report', '📊 Day Report'], ['settings', '⚙ Settings']] : [])];
+  const links = [...(u.role !== 'checkin' ? [['snack', '🍪 Snack Sale']] : []), ...(u.role !== 'snack' ? [['checkin', '🍱 Lunch Check-in']] : []), ...(u.role === 'admin' ? [['report', '📊 Day Report'], ['settings', '⚙ Settings']] : [])];
   document.body.insertAdjacentHTML('afterbegin', `<nav>${links.map(([h, l]) => `<a href="/${h}" class="${h === active ? 'on' : ''}">${l}</a>`).join('')}
     <button id="logout" style="flex:0 0 auto;white-space:nowrap" title="Log out">${esc(u.label)} · Log out</button></nav>`);
   document.getElementById('logout').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); location.href = '/login'; };
@@ -33,7 +33,7 @@ export async function mountPOS(root, { category, title = 'Current sale' }) {
   root.innerHTML = `<div class="pos"><section><div class="grid" data-r="items"></div>
     ${editor}</section>
     <aside class="panel"><h3 style="margin-top:0">${title}</h3><div data-r="cart"></div>
-      <div class="total" data-r="total">$0.00</div><div class="pay" data-r="pay">${payButtons(true)}</div>
+      <div class="total" data-r="total">$0.00</div><div class="pay" data-r="pay">${payButtons(true)}<button class="vol" data-m="volunteer" disabled>🤝 Give to volunteer (free)</button></div>
       <button data-r="clear" style="width:100%;margin-top:10px">Clear</button></aside></div>`;
   const r = (n) => root.querySelector(`[data-r="${n}"]`);
   let items = [], cart = new Map();
@@ -64,8 +64,9 @@ export async function mountPOS(root, { category, title = 'Current sale' }) {
       f.click(); }
     if (d.price) { const v = prompt('New price (e.g. 15.99)'); if (v !== null && v.trim() !== '') { await api('PUT', '/api/snacks/' + d.price, { price: v }); load(); } }
     if (d.del && confirm('Remove this item?')) { await api('DELETE', '/api/snacks/' + d.del); load(); }
-    if (d.m) { const res = await api('POST', '/api/sales', { method: d.m, items: [...cart].map(([id, qty]) => ({ id: +id, qty })) });
-      toast(`Logged ${money(res.total_cents)} · ${d.m}` + (res.excel ? '' : ' (Excel not updated — is the file open?)')); cart.clear(); drawCart(); root.dispatchEvent(new CustomEvent('sale', { bubbles: true })); }
+    if (d.m) {
+      const res = await api('POST', '/api/sales', { method: d.m, items: [...cart].map(([id, qty]) => ({ id: +id, qty })) });
+      toast((res.volunteer ? 'Logged for volunteer ✓' : `Logged ${money(res.total_cents)} · ${d.m}`) + (res.excel ? '' : ' (Excel not updated — is the file open?)')); cart.clear(); drawCart(); root.dispatchEvent(new CustomEvent('sale', { bubbles: true })); }
     if (t === r('clear')) { cart.clear(); drawCart(); }
     if (isAdmin && t === r('add')) { await api('POST', '/api/snacks', { name: r('nn').value, price: r('np').value || 0, category }); r('nn').value = r('np').value = ''; load(); }
   });
